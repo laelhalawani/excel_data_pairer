@@ -321,7 +321,6 @@ class ExcelDataPairer:
     # ---------------------------
     # Data Pair Management Methods
     # ---------------------------
-
     def add_data_pair(
         self, 
         sheet_id: Union[str, int], 
@@ -335,43 +334,61 @@ class ExcelDataPairer:
         Add a data pair to a specified sheet in the Excel schema.
         Takes source and MT ranges, retrieves values from the Excel file, and adds the data pair.
         If MT ranges are not provided, the source ranges are used for both.
+
         Args:
             sheet_id (Union[str, int]): Identifier of the sheet.
             src_columns_range (str): Source columns range (e.g., 'A-C').
             src_rows_range (str): Source rows range (e.g., '1-10').
-            mt_columns_range (str): MT columns range (e.g., 'D-F').
-            mt_rows_range (str): MT rows range (e.g., '1-10').
+            mt_columns_range (Optional[str]): MT columns range (e.g., 'D-F'). Defaults to src_columns_range if not provided.
+            mt_rows_range (Optional[str]): MT rows range (e.g., '1-10'). Defaults to src_rows_range if not provided.
             present_ok (bool): If True, does not raise an error if the data pair already exists, skips adding.
-        
+
         Raises:
             ValueError: If the specified sheet does not exist or a duplicate data pair is detected.
         """
+        # Validate input ranges
         if not src_columns_range or not src_rows_range:
-            raise ValueError("At least one of 'mt_columns_range' or 'mt_rows_range' must be provided.")
+            raise ValueError("Both 'src_columns_range' and 'src_rows_range' must be provided.")
+        
+        # Default MT ranges to source ranges if not provided
         if not mt_columns_range:
             mt_columns_range = src_columns_range
         if not mt_rows_range:
             mt_rows_range = src_rows_range
+
+        # Ensure an Excel file is selected
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file before adding a data pair.")
+        
+        # Resolve sheet_id if it's an index
         if isinstance(sheet_id, int):
-            sheet_id = self.list_file_sheets()[sheet_id]
-        sheet = self._find_sheet(sheet_id)
-        if not sheet:
-            self.add_sheet(sheet_id)
-            #raise ValueError(f"Sheet with id '{sheet_id}' does not exist in the schema.")
+            try:
+                sheet_id = self.list_file_sheets()[sheet_id]
+            except IndexError:
+                raise ValueError(f"No sheet found at index {sheet_id}.")
 
+        # Attempt to find the sheet in the schema
+        sheet = self._find_sheet(sheet_id)
+        
+        # If sheet doesn't exist in schema, add it
+        if not sheet:
+            self.add_sheet(sheet_id, present_ok=True)
+            # Reassign sheet after adding
+            sheet = self._find_sheet(sheet_id)
+            if not sheet:
+                raise ValueError(f"Failed to add sheet '{sheet_id}' to the schema.")
+        
+        # Retrieve values from the specified ranges
         src_values = self.preview_range(sheet_id, src_columns_range, src_rows_range)
         mt_values = self.preview_range(sheet_id, mt_columns_range, mt_rows_range)
+        
         # Create the new DataPair
         new_data_pair = DataPair(
             src=CellRange(columns_range=src_columns_range, rows_range=src_rows_range, values=src_values),
             mt=CellRange(columns_range=mt_columns_range, rows_range=mt_rows_range, values=mt_values)
         )
 
-        # Check for duplicates
-        if not sheet.sheet_data:
-            sheet.sheet_data = []
+        # Check for duplicates and update if necessary
         added = False
         for i, existing_pair in enumerate(sheet.sheet_data):
             if existing_pair == new_data_pair:
@@ -382,14 +399,18 @@ class ExcelDataPairer:
                     )
                 else:
                     print(f"DataPair({existing_pair}) already exists in sheet '{sheet_id}'. Updating...")
-                sheet.sheet_data[i] = new_data_pair
-                added = True
+                    sheet.sheet_data[i] = new_data_pair
+                    added = True
+                    break  # Exit loop after updating
 
-        # If no duplicate, add the new DataPair
+        # If no duplicate found, append the new DataPair
         if not added:
             sheet.sheet_data.append(new_data_pair) 
             print(f"DataPair({new_data_pair}) added to sheet '{sheet_id}' successfully.")
+        
+        # Autosave the configuration if enabled
         self._autosave_config()
+
 
     def remove_data_pair(self, sheet_id: Union[str, int], index: int) -> None:
         """
