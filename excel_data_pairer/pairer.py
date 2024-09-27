@@ -70,10 +70,10 @@ class FileSchema(BaseModel):
     )
 
 # -------------------------------
-# ExcelNavigator Class
+# ExcelPairer Class
 # -------------------------------
 
-class ExcelNavigator:
+class ExcelDataPairer:
     """
     A class to navigate and manipulate Excel files based on a defined schema using Pydantic and OpenPyXL.
     

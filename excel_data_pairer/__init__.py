@@ -1,1 +1,1 @@
-from .navigator import ExcelNavigator
+from .pairer import ExcelDataPairer
