@@ -93,7 +93,7 @@ class ExcelNavigator:
         self.waiting_for_autosave = autoload
         self.autosave_dir = './autosaves'
         os.makedirs(self.autosave_dir, exist_ok=True)
-        self.autosave_path = None
+        self.autosave_path: Optional[str] = None
         self.workbook = None
         if file_path:
             self.select_excel_file(file_path=file_path, autoload=autoload)
@@ -112,6 +112,9 @@ class ExcelNavigator:
         
         Returns:
             List[str]: List of Excel file names in the directory.
+        
+        Raises:
+            FileNotFoundError: If the directory does not exist.
         """
         excel_extensions = ('.xlsx', '.xlsm', '.xltx', '.xltm')
         try:
@@ -142,6 +145,7 @@ class ExcelNavigator:
         Raises:
             ValueError: If file cannot be found or parameters are invalid.
         """
+        # Determine whether to enable autosave based on parameters and existing state
         if autoload is True or (autoload is None and self.waiting_for_autosave):
             self.waiting_for_autosave = False
             autoload = True
@@ -149,6 +153,8 @@ class ExcelNavigator:
         elif autoload is False:
             self.waiting_for_autosave = False
             self.autosave = False
+
+        # Determine file_path based on provided parameters
         if file_path:
             if not os.path.isfile(file_path):
                 raise FileNotFoundError(f"The file '{file_path}' does not exist.")
@@ -181,6 +187,7 @@ class ExcelNavigator:
             print(f"Excel file '{file_path}' loaded successfully.")
         except Exception as e:
             raise ValueError(f"Failed to load Excel file '{file_path}': {e}")
+        
         if autoload:
             self._autoload_config()
 
@@ -473,6 +480,9 @@ class ExcelNavigator:
         
         Returns:
             List[str]: List of sheet names in the Excel workbook.
+        
+        Raises:
+            ValueError: If no file is selected.
         """
         if not self.workbook:
             raise ValueError("No Excel file selected. Please select an Excel file to list its sheets.")
@@ -572,7 +582,8 @@ class ExcelNavigator:
         """
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file to serialize the schema.")
-        return self.file_schema.json(indent=indent)
+        # Use Pydantic v2's model_dump_json
+        return self.file_schema.model_dump_json(indent=indent)
 
     def save_to_file(self, output_path: Optional[str] = None) -> None:
         """
@@ -616,7 +627,8 @@ class ExcelNavigator:
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 json_data = f.read()
-            self.file_schema = FileSchema.parse_raw(json_data)
+            # Use Pydantic v2's model_validate_json
+            self.file_schema = FileSchema.model_validate_json(json_data)
             # Reload the workbook to match the updated schema
             self.workbook = load_workbook(filename=self.file_schema.file_path, data_only=True)
             print(f"Schema loaded from '{json_path}' successfully.")
