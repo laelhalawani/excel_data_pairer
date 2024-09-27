@@ -1,4 +1,4 @@
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Tuple, Union
 from pydantic import BaseModel, Field, ValidationError
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string
@@ -11,16 +11,23 @@ import os
 
 class CellRange(BaseModel):
     """
-    Represents a range of cells within a column and specified rows in an Excel sheet.
+    Represents a range of cells within specified columns and rows in an Excel sheet.
     """
-    column: Optional[str] = Field(
+    columns_range: Optional[str] = Field(
         None,
-        description="The column identifier (e.g., 'A', 'B', etc.)."
+        description="The range of columns (e.g., 'A-C').",
     )
     rows_range: Optional[str] = Field(
         None,
         description="The range of rows (e.g., '1-10')."
     )
+    values: Optional[List[Union[str,int,float, None]]] = Field(
+        None,
+        description="The values of the cell range.",
+        repr=False
+    )
+
+    
 
 class DataPair(BaseModel):
     """
@@ -34,6 +41,7 @@ class DataPair(BaseModel):
         default_factory=CellRange,
         description="MT cell range."
     )
+
 
 class SheetSchema(BaseModel):
     """
@@ -219,7 +227,7 @@ class ExcelNavigator:
             try:
                 with open(self.autosave_path, 'w', encoding='utf-8') as f:
                     f.write(self.to_json())
-                print(f"Autosaved schema to '{self.autosave_path}'.")
+                #print(f"Autosaved schema to '{self.autosave_path}'.")
             except Exception as e:
                 print(f"Failed to autosave schema: {e}")
 
@@ -240,18 +248,20 @@ class ExcelNavigator:
     # Sheet Management Methods
     # ---------------------------
 
-    def add_sheet(self, sheet_id: str, present_ok:bool=True) -> None:
+    def add_sheet(self, sheet_id: Union[str, int], present_ok:bool=True) -> None:
         """
         Add a new sheet to the Excel schema.
         
         Args:
-            sheet_id (str): Unique identifier for the sheet.
+            sheet_id (Union[str, int]): Identifier of the sheet to add.
         
         Raises:
             ValueError: If a sheet with the given sheet_id already exists or no file is selected.
         """
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file before adding a sheet.")
+        if isinstance(sheet_id, int):
+            sheet_id = self.list_file_sheets()[sheet_id]
         if self._find_sheet(sheet_id):
             if not present_ok:
                 raise ValueError(f"Sheet with id '{sheet_id}' already exists in the schema.")
@@ -265,18 +275,20 @@ class ExcelNavigator:
         print(f"Sheet '{sheet_id}' added to schema successfully.")
         self._autosave_config()
 
-    def remove_sheet(self, sheet_id: str) -> None:
+    def remove_sheet(self, sheet_id: Union[str, int]) -> None:
         """
         Remove a sheet from the schema and the workbook.
         
         Args:
-            sheet_id (str): Identifier of the sheet to remove.
+            sheet_id (Union[str, int]): Identifier of the sheet to remove.
         
         Raises:
             ValueError: If the sheet does not exist in the schema or workbook.
         """
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file before removing a sheet.")
+        if isinstance(sheet_id, int):
+            sheet_id = self.list_file_sheets()[sheet_id]
         sheet_schema = self._find_sheet(sheet_id)
         if not sheet_schema:
             raise ValueError(f"Sheet with id '{sheet_id}' does not exist in the schema.")
@@ -312,57 +324,72 @@ class ExcelNavigator:
 
     def add_data_pair(
         self, 
-        sheet_id: str, 
-        src_column: str, 
-        src_rows: str, 
-        mt_column: str, 
-        mt_rows: str,
+        sheet_id: Union[str, int], 
+        src_columns_range: str, 
+        src_rows_range: str, 
+        mt_columns_range: str, 
+        mt_rows_range: str,
         present_ok:bool=True
     ) -> None:
         """
         Add a data pair to a specified sheet in the Excel schema.
         
         Args:
-            sheet_id (str): Identifier of the sheet to add the data pair to.
-            src_column (str): Source column identifier (e.g., 'A').
-            src_rows (str): Source rows range (e.g., '1-10').
-            mt_column (str): MT column identifier (e.g., 'B').
-            mt_rows (str): MT rows range (e.g., '1-10').
+            sheet_id (Union[str, int]): Identifier of the sheet.
+            src_columns_range (str): Source columns range (e.g., 'A-C').
+            src_rows_range (str): Source rows range (e.g., '1-10').
+            mt_columns_range (str): MT columns range (e.g., 'B-D').
+            mt_rows_range (str): MT rows range (e.g., '1-10').
+            present_ok (bool): If True, does not raise an error if the data pair already exists, skips adding.
         
         Raises:
             ValueError: If the specified sheet does not exist or a duplicate data pair is detected.
         """
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file before adding a data pair.")
+        if isinstance(sheet_id, int):
+            sheet_id = self.list_file_sheets()[sheet_id]
         sheet = self._find_sheet(sheet_id)
         if not sheet:
-            raise ValueError(f"Sheet with id '{sheet_id}' does not exist in the schema.")
+            self.add_sheet(sheet_id)
+            #raise ValueError(f"Sheet with id '{sheet_id}' does not exist in the schema.")
 
+        src_values = self.preview_range(sheet_id, src_columns_range, src_rows_range)
+        mt_values = self.preview_range(sheet_id, mt_columns_range, mt_rows_range)
         # Create the new DataPair
         new_data_pair = DataPair(
-            src=CellRange(column=src_column, rows_range=src_rows),
-            mt=CellRange(column=mt_column, rows_range=mt_rows)
+            src=CellRange(columns_range=src_columns_range, rows_range=src_rows_range, values=src_values),
+            mt=CellRange(columns_range=mt_columns_range, rows_range=mt_rows_range, values=mt_values)
         )
 
         # Check for duplicates
-        for existing_pair in sheet.sheet_data:
+        if not sheet.sheet_data:
+            sheet.sheet_data = []
+        added = False
+        for i, existing_pair in enumerate(sheet.sheet_data):
             if existing_pair == new_data_pair:
                 if not present_ok:
-                    raise ValueError(f"Duplicate DataPair detected in sheet '{sheet_id}'. The DataPair with src={new_data_pair.src} and mt={new_data_pair.mt} already exists.")
+                    raise ValueError(
+                        f"Duplicate DataPair detected in sheet '{sheet_id}'. "
+                        f"The DataPair({existing_pair}) already exists."
+                    )
                 else:
-                    print(f"The Data Pair with src={new_data_pair.src} and mt={new_data_pair.mt} already exists. Skipping.")
+                    print(f"DataPair({existing_pair}) already exists in sheet '{sheet_id}'. Updating...")
+                sheet.sheet_data[i] = new_data_pair
+                added = True
+
         # If no duplicate, add the new DataPair
-        sheet.sheet_data.append(new_data_pair)
-        print(f"Data pair added to sheet '{sheet_id}' successfully.")
+        if not added:
+            sheet.sheet_data.append(new_data_pair) 
+            print(f"DataPair({new_data_pair}) added to sheet '{sheet_id}' successfully.")
         self._autosave_config()
 
-
-    def remove_data_pair(self, sheet_id: str, index: int) -> None:
+    def remove_data_pair(self, sheet_id: Union[str, int], index: int) -> None:
         """
         Remove a data pair from a sheet by its index in the schema.
         
         Args:
-            sheet_id (str): Identifier of the sheet.
+            sheet_id (Union[str, int]): Identifier of the sheet.
             index (int): Index of the data pair to remove.
         
         Raises:
@@ -380,7 +407,8 @@ class ExcelNavigator:
         except IndexError:
             raise ValueError(f"Data pair index '{index}' is out of range for sheet '{sheet_id}'.")
 
-    def list_data_pairs(self, sheet_id: str) -> List[DataPair]:
+
+    def list_data_pairs(self, sheet_id: Union[str, int]) -> List[DataPair]:
         """
         List all data pairs in a specified sheet.
         
@@ -400,16 +428,18 @@ class ExcelNavigator:
             raise ValueError(f"Sheet with id '{sheet_id}' does not exist in the schema.")
         return sheet.sheet_data
 
+
+
     # ---------------------------
     # Data Retrieval Methods
     # ---------------------------
 
-    def get_data(self, sheet_id: str, src: CellRange, mt: CellRange) -> Dict[str, List[Any]]:
+    def get_data(self, sheet_id: Union[str, int], src: CellRange, mt: CellRange) -> Dict[str, List[Any]]:
         """
         Retrieve data from specified source and MT ranges within a sheet.
         
         Args:
-            sheet_id (str): Identifier of the sheet.
+            sheet_id (Union[str, int]): Identifier of the sheet.
             src (CellRange): Source cell range.
             mt (CellRange): MT cell range.
         
@@ -421,6 +451,8 @@ class ExcelNavigator:
         """
         if not self.file_schema or not self.workbook:
             raise ValueError("No Excel file selected. Please select an Excel file before retrieving data.")
+        if isinstance(sheet_id, int):
+            sheet_id = self.list_file_sheets()[sheet_id]
         sheet_schema = self._find_sheet(sheet_id)
         if not sheet_schema:
             raise ValueError(f"Sheet with id '{sheet_id}' does not exist in the schema.")
@@ -465,13 +497,13 @@ class ExcelNavigator:
                     print(f"Error retrieving data from sheet '{sheet_id}': {ve}")
         return all_data
 
-    def preview_range(self, sheet_id: str, column: str, rows_range: str) -> List[Any]:
+    def preview_range(self, sheet_id: Union[str, int], columns_range: str, rows_range: str) -> List[Any]:
         """
         Output a list of values from a specified range in a given sheet.
         
         Args:
-            sheet_id (str): Identifier of the sheet.
-            column (str): Column identifier (e.g., 'A').
+            sheet_id (Union[str, int]): Identifier of the sheet or index in the schema.
+            columns_range (str): Columns range (e.g., 'A-C').
             rows_range (str): Rows range (e.g., '1-10').
         
         Returns:
@@ -482,14 +514,18 @@ class ExcelNavigator:
         """
         if not self.workbook:
             raise ValueError("No Excel file selected. Please select an Excel file before previewing data.")
+        if isinstance(sheet_id, int):
+            sheet_id = self.list_file_sheets()[sheet_id]
         if sheet_id not in self.workbook.sheetnames:
             raise ValueError(f"Sheet '{sheet_id}' does not exist in the Excel file.")
 
         sheet = self.workbook[sheet_id]
-        cell_range = CellRange(column=column, rows_range=rows_range)
+        cell_range = CellRange(columns_range=columns_range, rows_range=rows_range)
         data = self._read_range(sheet, cell_range)
+        #print(f"Preview of range columns '{columns_range} rows {rows_range}' in sheet '{sheet_id}': {data}")
         return data
 
+    
     def list_file_sheets(self) -> List[str]:
         """
         List all available sheet names in the Excel file.
@@ -508,18 +544,21 @@ class ExcelNavigator:
     # Helper Methods
     # ---------------------------
 
-    def _find_sheet(self, sheet_id: str) -> Optional[SheetSchema]:
+    def _find_sheet(self, sheet_id: Union[str, int]) -> Optional[SheetSchema]:
         """
         Find a sheet in the schema by its identifier.
         
         Args:
-            sheet_id (str): Identifier of the sheet.
+            sheet_id (Union[str, int]): Identifier of the sheet.
         
         Returns:
             Optional[SheetSchema]: The sheet schema if found, else None.
         """
+        
         if not self.file_schema:
             return None
+        if isinstance(sheet_id, int):
+            sheet_id = self.list_file_sheets()[sheet_id]
         for sheet in self.file_schema.file_data:
             if sheet.sheet_id == sheet_id:
                 return sheet
@@ -539,33 +578,56 @@ class ExcelNavigator:
         Raises:
             ValueError: If column or row range is invalid.
         """
-        if not cell_range.column or not cell_range.rows_range:
-            raise ValueError("Both 'column' and 'rows_range' must be specified in CellRange.")
+        if not cell_range.columns_range or not cell_range.rows_range:
+            raise ValueError("Both 'columns_range' and 'rows_range' must be specified in CellRange.")
         
-        # Parse the column
+        # Parse the columns range
         try:
-            start_col = column_index_from_string(cell_range.column.upper())
-            end_col = start_col  # Single column as per schema
-        except ValueError:
-            raise ValueError(f"Invalid column identifier: '{cell_range.column}'.")
-        
-        if '-' not in cell_range.rows_range:
-            raise ValueError(f"Invalid rows_range `{cell_range.rows_range}` format: missing '-', for a single row use '1-1'.")
-        # Parse the row range
+            start_col_str, end_col_str = self._parse_range(cell_range.columns_range)
+            start_col = column_index_from_string(start_col_str.upper())
+            end_col = column_index_from_string(end_col_str.upper())
+        except ValueError as ve:
+            raise ValueError(f"Invalid columns_range: {ve}")
+
+        # Parse the rows range
         try:
-            row_start, row_end = map(int, cell_range.rows_range.split('-'))
+            row_start, row_end = self._parse_range(cell_range.rows_range)
+            if row_start.isdigit() and row_end.isdigit():
+                row_start, row_end = int(row_start), int(row_end)
             if row_start > row_end:
-                raise ValueError(f"Invalid rows_range: start row {row_start} is greater than end row {row_end}.")
+                raise ValueError(f"Start row {row_start} is greater than end row {row_end}.")
         except Exception:
             raise ValueError(f"Invalid rows_range format: '{cell_range.rows_range}'. Expected format 'start-end'.")
-        
+
         # Collect data
         data = []
         for row in sheet.iter_rows(min_row=row_start, max_row=row_end, min_col=start_col, max_col=end_col):
             for cell in row:
                 data.append(cell.value)
-        
+
         return data
+
+    def _parse_range(self, range_str: str) -> Tuple[str, str]:
+        """
+        Parse a range string into start and end elements.
+        
+        Args:
+            range_str (str): Range string (e.g., 'A-C').
+        
+        Returns:
+            tuple: (start, end)
+        
+        Raises:
+            ValueError: If the range format is invalid.
+        """
+        if '-' not in range_str:
+            # Single column or row
+            return (range_str, range_str)
+        parts = range_str.split('-')
+        if len(parts) != 2:
+            raise ValueError(f"Invalid range format: '{range_str}'. Expected format 'start-end'.")
+        start, end = parts
+        return (start.strip(), end.strip())
 
     # ---------------------------
     # Schema Serialization Methods
@@ -660,12 +722,12 @@ class ExcelNavigator:
     # Workbook Manipulation Methods
     # ---------------------------
 
-    def update_cell(self, sheet_id: str, cell: str, value: Any) -> None:
+    def update_cell(self, sheet_id: Union[str, int], cell: str, value: Any) -> None:
         """
         Update the value of a specific cell in a sheet and save the workbook.
         
         Args:
-            sheet_id (str): Identifier of the sheet.
+            sheet_id (Union[str, int]): Identifier of the sheet.
             cell (str): Cell identifier (e.g., 'A1').
             value (Any): New value for the cell.
         
@@ -674,6 +736,8 @@ class ExcelNavigator:
         """
         if not self.workbook:
             raise ValueError("No Excel file selected. Please select an Excel file before updating cells.")
+        if isinstance(sheet_id, int):
+            sheet_id = self.list_file_sheets()[sheet_id]
         if sheet_id not in self.workbook.sheetnames:
             raise ValueError(f"Sheet '{sheet_id}' does not exist in the Excel file.")
         

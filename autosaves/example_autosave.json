@@ -1,9 +1,0 @@
-{
-    "file_path": "./excel_files\\example.xlsx",
-    "file_data": [
-        {
-            "sheet_id": "DFW_new_categories",
-            "sheet_data": []
-        }
-    ]
-}
