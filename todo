@@ -1,0 +1,1 @@
+if for src we get columns and rows but for mt only columns or only rows, then assume the other value is the same as from src

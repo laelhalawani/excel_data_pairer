@@ -327,24 +327,31 @@ class ExcelDataPairer:
         sheet_id: Union[str, int], 
         src_columns_range: str, 
         src_rows_range: str, 
-        mt_columns_range: str, 
-        mt_rows_range: str,
+        mt_columns_range: Optional[str]=None, 
+        mt_rows_range: Optional[str]=None,
         present_ok:bool=True
     ) -> None:
         """
         Add a data pair to a specified sheet in the Excel schema.
-        
+        Takes source and MT ranges, retrieves values from the Excel file, and adds the data pair.
+        If MT ranges are not provided, the source ranges are used for both.
         Args:
             sheet_id (Union[str, int]): Identifier of the sheet.
             src_columns_range (str): Source columns range (e.g., 'A-C').
             src_rows_range (str): Source rows range (e.g., '1-10').
-            mt_columns_range (str): MT columns range (e.g., 'B-D').
+            mt_columns_range (str): MT columns range (e.g., 'D-F').
             mt_rows_range (str): MT rows range (e.g., '1-10').
             present_ok (bool): If True, does not raise an error if the data pair already exists, skips adding.
         
         Raises:
             ValueError: If the specified sheet does not exist or a duplicate data pair is detected.
         """
+        if not src_columns_range or not src_rows_range:
+            raise ValueError("At least one of 'mt_columns_range' or 'mt_rows_range' must be provided.")
+        if not mt_columns_range:
+            mt_columns_range = src_columns_range
+        if not mt_rows_range:
+            mt_rows_range = src_rows_range
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file before adding a data pair.")
         if isinstance(sheet_id, int):
