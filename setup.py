@@ -10,7 +10,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
-    name='excel_data_pairer',  # Changed to match your repository name
+    name='excel_data_pairer',  
     version='0.0.1',  # Initial version
     author='Lael Al-Halawani',
     author_email='laelhalawani@gmail.com',
