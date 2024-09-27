@@ -240,7 +240,7 @@ class ExcelNavigator:
     # Sheet Management Methods
     # ---------------------------
 
-    def add_sheet(self, sheet_id: str) -> None:
+    def add_sheet(self, sheet_id: str, present_ok:bool=True) -> None:
         """
         Add a new sheet to the Excel schema.
         
@@ -253,7 +253,11 @@ class ExcelNavigator:
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file before adding a sheet.")
         if self._find_sheet(sheet_id):
-            raise ValueError(f"Sheet with id '{sheet_id}' already exists in the schema.")
+            if not present_ok:
+                raise ValueError(f"Sheet with id '{sheet_id}' already exists in the schema.")
+            else:
+                print(f"Sheet with id '{sheet_id}' already exists in the schema.")
+                return
         if sheet_id not in self.workbook.sheetnames:
             raise ValueError(f"Sheet '{sheet_id}' does not exist in the Excel file.")
         new_sheet = SheetSchema(sheet_id=sheet_id)
@@ -312,7 +316,8 @@ class ExcelNavigator:
         src_column: str, 
         src_rows: str, 
         mt_column: str, 
-        mt_rows: str
+        mt_rows: str,
+        present_ok:bool=True
     ) -> None:
         """
         Add a data pair to a specified sheet in the Excel schema.
@@ -325,21 +330,32 @@ class ExcelNavigator:
             mt_rows (str): MT rows range (e.g., '1-10').
         
         Raises:
-            ValueError: If the specified sheet does not exist.
+            ValueError: If the specified sheet does not exist or a duplicate data pair is detected.
         """
         if not self.file_schema:
             raise ValueError("No Excel file selected. Please select an Excel file before adding a data pair.")
         sheet = self._find_sheet(sheet_id)
         if not sheet:
             raise ValueError(f"Sheet with id '{sheet_id}' does not exist in the schema.")
-        
-        data_pair = DataPair(
+
+        # Create the new DataPair
+        new_data_pair = DataPair(
             src=CellRange(column=src_column, rows_range=src_rows),
             mt=CellRange(column=mt_column, rows_range=mt_rows)
         )
-        sheet.sheet_data.append(data_pair)
+
+        # Check for duplicates
+        for existing_pair in sheet.sheet_data:
+            if existing_pair == new_data_pair:
+                if not present_ok:
+                    raise ValueError(f"Duplicate DataPair detected in sheet '{sheet_id}'. The DataPair with src={new_data_pair.src} and mt={new_data_pair.mt} already exists.")
+                else:
+                    print(f"The Data Pair with src={new_data_pair.src} and mt={new_data_pair.mt} already exists. Skipping.")
+        # If no duplicate, add the new DataPair
+        sheet.sheet_data.append(new_data_pair)
         print(f"Data pair added to sheet '{sheet_id}' successfully.")
         self._autosave_config()
+
 
     def remove_data_pair(self, sheet_id: str, index: int) -> None:
         """
@@ -533,6 +549,8 @@ class ExcelNavigator:
         except ValueError:
             raise ValueError(f"Invalid column identifier: '{cell_range.column}'.")
         
+        if '-' not in cell_range.rows_range:
+            raise ValueError(f"Invalid rows_range `{cell_range.rows_range}` format: missing '-', for a single row use '1-1'.")
         # Parse the row range
         try:
             row_start, row_end = map(int, cell_range.rows_range.split('-'))
